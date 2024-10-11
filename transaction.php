@@ -10,10 +10,23 @@ if (!isset($_SESSION['customer_id'])) {
 $customer_id = $_SESSION['customer_id'];
 $message = "";
 $message_type = "info";
+$minimum_balance = 25000; // Minimum balance in Rupiah
 
 // Fungsi untuk memvalidasi input
 function validateInput($input) {
     return htmlspecialchars(trim($input));
+}
+
+// Fungsi untuk mengkonversi format mata uang ke angka
+function currencyToNumber($amount) {
+    // Menghapus 'Rp ' jika ada
+    $amount = str_replace('Rp ', '', $amount);
+    // Menghapus semua titik pemisah ribuan
+    $amount = str_replace('.', '', $amount);
+    // Mengganti koma desimal dengan titik (jika ada)
+    $amount = str_replace(',', '.', $amount);
+    // Mengkonversi ke float
+    return (float) $amount;
 }
 
 // Ambil daftar akun customer untuk dropdown
@@ -29,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if ($transaction_type == 'transfer') {
         $from_account_number = validateInput($_POST['from_account']);
         $to_account_number = validateInput($_POST['to_account']);
-        $amount = floatval($_POST['amount']);
+        $amount = currencyToNumber($_POST['amount']);
 
         if ($amount <= 0) {
             $message = "Jumlah transfer harus lebih dari 0!";
@@ -56,8 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } elseif ($from_account_number === $to_account_number) {
                 $message = "Tidak dapat transfer ke akun yang sama!";
                 $message_type = "danger";
-            } elseif ($amount > $from_account['available_balance']) {
-                $message = "Saldo tidak mencukupi!";
+            } elseif ($from_account['available_balance'] - $amount < $minimum_balance) {
+                $message = "Saldo minimal yang harus tersisa adalah Rp " . number_format($minimum_balance, 0, ',', '.') . "!";
                 $message_type = "danger";
             } else {
                 $conn->begin_transaction();
@@ -98,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     } elseif ($transaction_type == 'topup') {
         $to_account_number = validateInput($_POST['topup_account']);
-        $amount = floatval($_POST['topup_amount']);
+        $amount = currencyToNumber($_POST['topup_amount']);
 
         if ($amount <= 0) {
             $message = "Jumlah topup harus lebih dari 0!";
@@ -145,12 +158,57 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
             }
         }
+    } elseif ($transaction_type == 'empty') {
+        $account_number = validateInput($_POST['empty_account']);
+        
+        // Validasi akun
+        $stmt = $conn->prepare("SELECT id, available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
+        $stmt->bind_param("si", $account_number, $customer_id);
+        $stmt->execute();
+        $account = $stmt->get_result()->fetch_assoc();
+
+        if (!$account) {
+            $message = "Akun tidak ditemukan!";
+            $message_type = "danger";
+        } else {
+            $conn->begin_transaction();
+
+            try {
+                $amount = $account['available_balance'];
+                
+                // Update saldo akun menjadi 0
+                $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = 0 WHERE id = ?");
+                $stmt->bind_param("i", $account['id']);
+                $stmt->execute();
+
+                // Simpan data transaksi
+                $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number, transaction_type) VALUES (?, ?, ?, NOW(), ?, ?, 'WITHDRAWAL')");
+                $status = 'success';
+                $system_account = 'SYSTEM';
+                $stmt->bind_param("idsss", $customer_id, $amount, $status, $account_number, $system_account);
+                $stmt->execute();
+
+                $conn->commit();
+                $message = "Penarikan berhasil! Saldo akun telah dikosongkan.";
+                $message_type = "success";
+                
+                // Refresh daftar akun setelah transaksi
+                $stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
+                $stmt->bind_param("i", $customer_id);
+                $stmt->execute();
+                $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            } catch (Exception $e) {
+                $conn->rollback();
+                $message = "Terjadi kesalahan dalam proses penarikan: " . $e->getMessage();
+                $message_type = "danger";
+            }
+        }
     }
 }
 
 // Fungsi untuk memformat angka ke format mata uang
 function formatCurrency($amount) {
-    return 'Rp ' . number_format($amount, 2, ',', '.');
+    return 'Rp ' . number_format($amount, 0, ',', '.');
 }
 ?>
 
@@ -161,6 +219,7 @@ function formatCurrency($amount) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transaksi</title>
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cleave.js/1.6.0/cleave.min.js"></script>
     <style>
         .form-control-lg {
             font-size: 1.25rem;
@@ -198,6 +257,9 @@ function formatCurrency($amount) {
             <li class="nav-item">
                 <a class="nav-link" id="topup-tab" data-toggle="tab" href="#topup" role="tab">Top Up</a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" id="empty-tab" data-toggle="tab" href="#empty" role="tab">Kosongkan Saldo</a>
+            </li>
         </ul>
 
         <div class="tab-content mt-3" id="transactionTabsContent">
@@ -224,7 +286,7 @@ function formatCurrency($amount) {
                     <div class="form-group">
                         <label for="amount">Jumlah</label>
                         <div class="currency-input">
-                            <input type="number" name="amount" id="amount" class="form-control form-control-lg" min="1" step="0.01" required>
+                            <input type="text" name="amount" id="amount" class="form-control form-control-lg" required>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-lg btn-block">Kirim Transfer</button>
@@ -250,10 +312,30 @@ function formatCurrency($amount) {
                     <div class="form-group">
                         <label for="topup_amount">Jumlah Top Up</label>
                         <div class="currency-input">
-                            <input type="number" name="topup_amount" id="topup_amount" class="form-control form-control-lg" min="1" step="0.01" required>
+                            <input type="text" name="topup_amount" id="topup_amount" class="form-control form-control-lg" required>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-success btn-lg btn-block">Proses Top Up</button>
+                </form>
+            </div>
+
+            <!-- Form Kosongkan Saldo -->
+            <div class="tab-pane fade" id="empty" role="tabpanel">
+                <form method="POST" action="" onsubmit="return confirmEmpty()">
+                    <input type="hidden" name="transaction_type" value="empty">
+                    <div class="form-group">
+                        <label for="empty_account">Pilih Akun untuk Dikosongkan</label>
+                        <select name="empty_account" id="empty_account" class="form-control form-control-lg" required>
+                            <?php foreach ($accounts as $account): ?>
+                                <option value="<?= htmlspecialchars($account['account_number']) ?>">
+                                    <?= htmlspecialchars($account['account_number']) ?> - 
+                                    <?= htmlspecialchars($account['account_type']) ?> 
+                                    (Saldo: <?= formatCurrency($account['available_balance']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-danger btn-lg btn-block">Kosongkan Saldo</button>
                 </form>
             </div>
         </div>
@@ -267,14 +349,24 @@ function formatCurrency($amount) {
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
-        // Script untuk memformat input jumlah uang
-        document.querySelectorAll('input[type=number]').forEach(function(input) {
-            input.addEventListener('input', function(e) {
-                if (this.value.length > 0) {
-                    this.value = parseFloat(this.value.replace(/,/g, '')).toLocaleString('id-ID');
-                }
+        document.addEventListener('DOMContentLoaded', function() {
+            var currencyInputs = document.querySelectorAll('#amount, #topup_amount');
+            currencyInputs.forEach(function(input) {
+                new Cleave(input, {
+                    numeral: true,
+                    numeralThousandsGroupStyle: 'thousand',
+                    numeralDecimalMark: ',',
+                    delimiter: '.',
+                    prefix: ' ',
+                    rawValueTrimPrefix: true
+                });
             });
         });
+
+        function confirmEmpty() {
+            return confirm("Apakah Anda yakin ingin mengosongkan saldo akun ini? Tindakan ini tidak dapat dibatalkan.");
+        }
     </script>
 </body>
 </html>
+                                    
