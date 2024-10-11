@@ -1,92 +1,156 @@
 <?php
-include 'config.php'; // Pastikan Anda sudah membuat file config.php untuk koneksi database
-session_start(); // Memulai sesi
+include 'config.php';
+session_start();
 
-// Periksa apakah pengguna sudah login
 if (!isset($_SESSION['customer_id'])) {
-    header("Location: login.php"); // Arahkan ke halaman login jika belum login
+    header("Location: login.php");
     exit();
 }
 
-// Mendapatkan ID customer dari sesi
 $customer_id = $_SESSION['customer_id'];
-
-// Inisialisasi variabel untuk pesan
 $message = "";
+$message_type = "info";
+
+// Fungsi untuk memvalidasi input
+function validateInput($input) {
+    return htmlspecialchars(trim($input));
+}
+
+// Ambil daftar akun customer untuk dropdown
+$stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
+$stmt->bind_param("i", $customer_id);
+$stmt->execute();
+$accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Proses form jika ada pengiriman data
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $from_account_number = $_POST['from_account']; // Nomor akun asal
-    $to_account_number = $_POST['to_account']; // Nomor akun tujuan
-    $amount = $_POST['amount']; // Jumlah
+    $transaction_type = validateInput($_POST['transaction_type']);
+    
+    if ($transaction_type == 'transfer') {
+        $from_account_number = validateInput($_POST['from_account']);
+        $to_account_number = validateInput($_POST['to_account']);
+        $amount = floatval($_POST['amount']);
 
-    // Validasi akun asal
-    $stmt = $conn->prepare("SELECT id, available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ?");
-    $stmt->bind_param("si", $from_account_number, $customer_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-
-    if ($result->num_rows === 0) {
-        $message = "Akun asal tidak ditemukan!";
-    } else {
-        // Ambil akun asal
-        $from_account = $result->fetch_assoc();
-
-        // Validasi akun tujuan
-        $stmt = $conn->prepare("SELECT id, account_name FROM m_portfolio_account WHERE account_number = ?");
-        $stmt->bind_param("s", $to_account_number);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($result->num_rows === 0) {
-            $message = "Akun tujuan tidak ditemukan!";
+        if ($amount <= 0) {
+            $message = "Jumlah transfer harus lebih dari 0!";
+            $message_type = "danger";
         } else {
-            // Ambil akun tujuan
-            $to_account = $result->fetch_assoc();
+            // Validasi akun asal
+            $stmt = $conn->prepare("SELECT id, available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
+            $stmt->bind_param("si", $from_account_number, $customer_id);
+            $stmt->execute();
+            $from_account = $stmt->get_result()->fetch_assoc();
 
-            // Cek apakah saldo cukup
-            if ($from_account['available_balance'] < $amount) {
-                $message = "Saldo tidak cukup untuk melakukan transaksi!";
+            // Validasi akun tujuan
+            $stmt = $conn->prepare("SELECT id, m_customer_id FROM m_portfolio_account WHERE account_number = ? FOR UPDATE");
+            $stmt->bind_param("s", $to_account_number);
+            $stmt->execute();
+            $to_account = $stmt->get_result()->fetch_assoc();
+
+            if (!$from_account) {
+                $message = "Akun asal tidak ditemukan!";
+                $message_type = "danger";
+            } elseif (!$to_account) {
+                $message = "Akun tujuan tidak ditemukan!";
+                $message_type = "danger";
+            } elseif ($from_account_number === $to_account_number) {
+                $message = "Tidak dapat transfer ke akun yang sama!";
+                $message_type = "danger";
+            } elseif ($amount > $from_account['available_balance']) {
+                $message = "Saldo tidak mencukupi!";
+                $message_type = "danger";
             } else {
-                // Proses transaksi
+                $conn->begin_transaction();
+                
+                try {
+                    // Kurangi saldo akun asal
+                    $new_balance_from = $from_account['available_balance'] - $amount;
+                    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE id = ?");
+                    $stmt->bind_param("di", $new_balance_from, $from_account['id']);
+                    $stmt->execute();
+
+                    // Tambah saldo akun tujuan
+                    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance + ? WHERE id = ?");
+                    $stmt->bind_param("di", $amount, $to_account['id']);
+                    $stmt->execute();
+
+                    // Simpan data transaksi
+                    $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number, transaction_type) VALUES (?, ?, ?, NOW(), ?, ?, 'TRANSFER')");
+                    $status = 'success';
+                    $stmt->bind_param("idsss", $customer_id, $amount, $status, $from_account_number, $to_account_number);
+                    $stmt->execute();
+
+                    $conn->commit();
+                    $message = "Transfer berhasil! Saldo telah dipotong dari akun Anda.";
+                    $message_type = "success";
+                    
+                    // Refresh daftar akun setelah transaksi
+                    $stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
+                    $stmt->bind_param("i", $customer_id);
+                    $stmt->execute();
+                    $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    $message = "Terjadi kesalahan dalam proses transfer: " . $e->getMessage();
+                    $message_type = "danger";
+                }
+            }
+        }
+    } elseif ($transaction_type == 'topup') {
+        $to_account_number = validateInput($_POST['topup_account']);
+        $amount = floatval($_POST['topup_amount']);
+
+        if ($amount <= 0) {
+            $message = "Jumlah topup harus lebih dari 0!";
+            $message_type = "danger";
+        } else {
+            // Validasi akun
+            $stmt = $conn->prepare("SELECT id FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
+            $stmt->bind_param("si", $to_account_number, $customer_id);
+            $stmt->execute();
+            $account = $stmt->get_result()->fetch_assoc();
+
+            if (!$account) {
+                $message = "Akun tidak ditemukan!";
+                $message_type = "danger";
+            } else {
                 $conn->begin_transaction();
 
                 try {
-                    // Kurangi saldo dari akun asal
-                    $new_from_balance = $from_account['available_balance'] - $amount;
-                    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE id = ?");
-                    $stmt->bind_param("di", $new_from_balance, $from_account['id']);
+                    // Update saldo akun
+                    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance + ? WHERE id = ?");
+                    $stmt->bind_param("di", $amount, $account['id']);
                     $stmt->execute();
 
-                    // Tambah saldo ke akun tujuan
-                    $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE id = ?");
-                    $stmt->bind_param("i", $to_account['id']);
-                    $stmt->execute();
-                    $result = $stmt->get_result();
-                    $to_account_data = $result->fetch_assoc();
-                    $new_to_balance = $to_account_data['available_balance'] + $amount;
-
-                    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE id = ?");
-                    $stmt->bind_param("di", $new_to_balance, $to_account['id']);
+                    // Simpan data transaksi
+                    $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number, transaction_type) VALUES (?, ?, ?, NOW(), ?, ?, 'TOPUP')");
+                    $status = 'success';
+                    $system_account = 'SYSTEM';
+                    $stmt->bind_param("idsss", $customer_id, $amount, $status, $system_account, $to_account_number);
                     $stmt->execute();
 
-                    // Simpan data transaksi ke tabel t_transaction
-                    $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number) VALUES (?, ?, ?, NOW(), ?, ?)");
-                    $status = 'success'; // Status transaksi
-                    $stmt->bind_param("isdss", $customer_id, $amount, $status, $from_account_number, $to_account_number);
-                    $stmt->execute();
-
-                    // Commit transaksi
                     $conn->commit();
-                    $message = "Transaksi berhasil!";
+                    $message = "Topup berhasil! Saldo telah ditambahkan ke akun Anda.";
+                    $message_type = "success";
+                    
+                    // Refresh daftar akun setelah transaksi
+                    $stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
+                    $stmt->bind_param("i", $customer_id);
+                    $stmt->execute();
+                    $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                 } catch (Exception $e) {
-                    // Rollback jika ada error
                     $conn->rollback();
-                    $message = "Terjadi kesalahan dalam proses transaksi: " . $e->getMessage();
+                    $message = "Terjadi kesalahan dalam proses topup: " . $e->getMessage();
+                    $message_type = "danger";
                 }
             }
         }
     }
+}
+
+// Fungsi untuk memformat angka ke format mata uang
+function formatCurrency($amount) {
+    return 'Rp ' . number_format($amount, 2, ',', '.');
 }
 ?>
 
@@ -97,34 +161,120 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transaksi</title>
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .form-control-lg {
+            font-size: 1.25rem;
+        }
+        .currency-input {
+            position: relative;
+        }
+        .currency-input:before {
+            position: absolute;
+            top: 0;
+            left: 10px;
+            content: "Rp";
+            display: block;
+            height: 100%;
+            font-size: 1.25rem;
+            line-height: 45px;
+        }
+        .currency-input input {
+            padding-left: 35px;
+        }
+    </style>
 </head>
 <body>
     <div class="container mt-5">
-        <h2 class="text-center">Transaksi</h2>
+        <h2 class="text-center mb-4">Transaksi</h2>
 
-        <!-- Tampilkan pesan -->
         <?php if ($message): ?>
-            <div class="alert alert-info"><?php echo htmlspecialchars($message); ?></div>
+            <div class="alert alert-<?php echo $message_type; ?>"><?php echo htmlspecialchars($message); ?></div>
         <?php endif; ?>
 
-        <form method="POST" action="">
-            <div class="form-group">
-                <label for="from_account">Dari Akun (Nomor Akun)</label>
-                <input type="text" name="from_account" class="form-control" required>
+        <ul class="nav nav-tabs" id="transactionTabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" id="transfer-tab" data-toggle="tab" href="#transfer" role="tab">Transfer</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" id="topup-tab" data-toggle="tab" href="#topup" role="tab">Top Up</a>
+            </li>
+        </ul>
+
+        <div class="tab-content mt-3" id="transactionTabsContent">
+            <!-- Form Transfer -->
+            <div class="tab-pane fade show active" id="transfer" role="tabpanel">
+                <form method="POST" action="">
+                    <input type="hidden" name="transaction_type" value="transfer">
+                    <div class="form-group">
+                        <label for="from_account">Dari Akun</label>
+                        <select name="from_account" id="from_account" class="form-control form-control-lg" required>
+                            <?php foreach ($accounts as $account): ?>
+                                <option value="<?= htmlspecialchars($account['account_number']) ?>">
+                                    <?= htmlspecialchars($account['account_number']) ?> - 
+                                    <?= htmlspecialchars($account['account_type']) ?> 
+                                    (Saldo: <?= formatCurrency($account['available_balance']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="to_account">Ke Akun (Nomor Akun)</label>
+                        <input type="text" name="to_account" id="to_account" class="form-control form-control-lg" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="amount">Jumlah</label>
+                        <div class="currency-input">
+                            <input type="number" name="amount" id="amount" class="form-control form-control-lg" min="1" step="0.01" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg btn-block">Kirim Transfer</button>
+                </form>
             </div>
-            <div class="form-group">
-                <label for="to_account">Ke Akun (Nomor Akun)</label>
-                <input type="text" name="to_account" class="form-control" required>
+
+            <!-- Form Top Up -->
+            <div class="tab-pane fade" id="topup" role="tabpanel">
+                <form method="POST" action="">
+                    <input type="hidden" name="transaction_type" value="topup">
+                    <div class="form-group">
+                        <label for="topup_account">Pilih Akun</label>
+                        <select name="topup_account" id="topup_account" class="form-control form-control-lg" required>
+                            <?php foreach ($accounts as $account): ?>
+                                <option value="<?= htmlspecialchars($account['account_number']) ?>">
+                                    <?= htmlspecialchars($account['account_number']) ?> - 
+                                    <?= htmlspecialchars($account['account_type']) ?> 
+                                    (Saldo: <?= formatCurrency($account['available_balance']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="topup_amount">Jumlah Top Up</label>
+                        <div class="currency-input">
+                            <input type="number" name="topup_amount" id="topup_amount" class="form-control form-control-lg" min="1" step="0.01" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success btn-lg btn-block">Proses Top Up</button>
+                </form>
             </div>
-            <div class="form-group">
-                <label for="amount">Jumlah</label>
-                <input type="number" name="amount" class="form-control" required>
-            </div>
-            <button type="submit" class="btn btn-primary btn-block">Kirim</button>
-        </form>
-        <div class="text-center mt-3">
-            <a href="dashboard.php" class="btn btn-secondary">Kembali ke Dashboard</a>
+        </div>
+
+        <div class="text-center mt-4">
+            <a href="dashboard.php" class="btn btn-secondary btn-lg">Kembali ke Dashboard</a>
         </div>
     </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        // Script untuk memformat input jumlah uang
+        document.querySelectorAll('input[type=number]').forEach(function(input) {
+            input.addEventListener('input', function(e) {
+                if (this.value.length > 0) {
+                    this.value = parseFloat(this.value.replace(/,/g, '')).toLocaleString('id-ID');
+                }
+            });
+        });
+    </script>
 </body>
 </html>
