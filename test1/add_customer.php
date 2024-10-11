@@ -14,12 +14,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Masukkan data ke database
     $stmt = $conn->prepare("INSERT INTO m_customer (customer_name, customer_username, customer_pin, customer_phone, customer_email, registration_account_number) VALUES (?, ?, ?, ?, ?, ?)");
     $stmt->bind_param("ssssss", $name, $username, $pin, $phone, $email, $account_number);
+    
     if ($stmt->execute()) {
         echo "Pendaftaran berhasil! Nomor akun: $account_number";
     } else {
         echo "Error: " . $stmt->error;
     }
+
+    // Tutup statement
+    $stmt->close();
 }
+
+// Tutup koneksi
+$conn->close();
 ?>
 
 <!DOCTYPE html>
