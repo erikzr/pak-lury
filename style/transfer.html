@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kirim ke Rekening Bank</title>
+    <link rel="stylesheet" href="transfer.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 h-screen flex items-center justify-center">
+    <div class="w-full max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
+      <!-- Header -->
+      <div class="flex items-center mb-4">
+        <i class="fas fa-arrow-left text-xl"></i>
+        <h1 class="text-center flex-grow text-xl font-semibold">
+          Kirim ke Rekening Bank
+        </h1>
+      </div>
+
+      <!-- Balance Info -->
+      <div class="bg-gray-800 text-white p-4 rounded-lg mb-6">
+        <p class="text-sm">Total Saldo</p>
+        <p class="text-3xl font-bold">Rp 20.000.000,00</p>
+        <p class="text-xs">Terakhir diperbarui 2 menit yang lalu.</p>
+      </div>
+
+      <!-- Form -->
+      <form>
+        <!-- Nomor Rekening -->
+        <div class="mb-4">
+          <label class="block text-gray-700 text-sm mb-2" for="account-number"
+            >Nomor Rekening</label
+          >
+          <input
+            class="input-field"
+            type="text"
+            id="account-number"
+            placeholder="Nomor Rekening"
+          />
+        </div>
+
+        <!-- Bank -->
+        <div class="mb-4">
+          <label class="block text-gray-700 text-sm mb-2" for="bank"
+            >Bank</label
+          >
+          <div class="relative">
+            <select class="input-field" id="bank">
+              <option>Pilih Bank</option>
+              <!-- Tambahkan opsi bank di sini -->
+            </select>
+            <i
+              class="fas fa-chevron-down absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500"
+            ></i>
+          </div>
+        </div>
+
+        <!-- Nama Penerima -->
+        <div class="mb-6">
+          <label class="block text-gray-700 text-sm mb-2" for="beneficiary-name"
+            >Nama Penerima</label
+          >
+          <input
+            class="input-field"
+            type="text"
+            id="beneficiary-name"
+            placeholder="Nama Penerima"
+          />
+        </div>
+
+        <!-- Continue Button -->
+        <button type="submit" class="submit-button">Lanjutkan</button>
+      </form>
+    </div>
+  </body>
+</html>

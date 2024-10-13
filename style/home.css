@@ -1,0 +1,124 @@
+/* Global styling */
+body {
+  background-color: #f7fafc;
+  color: #1a202c;
+  font-family: "Arial", sans-serif;
+}
+
+/* Main container styling */
+.dashboard-container {
+  max-width: 400px;
+  margin: 2rem auto;
+  background-color: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Header styling */
+.header {
+  padding: 1rem;
+  background-color: black;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Header text styling */
+.header-text .welcome {
+  font-size: 0.9rem;
+}
+
+.header-text .subtext {
+  font-size: 0.75rem;
+}
+
+.header-icons i {
+  margin-left: 1rem;
+}
+
+/* Balance section styling */
+.balance-section {
+  padding: 1rem;
+  text-align: center; /* Centered text */
+}
+
+.balance-label {
+  font-size: 0.875rem;
+  color: #718096;
+}
+
+.balance-amount {
+  font-size: 2rem;
+  font-weight: bold;
+}
+
+.balance-updated {
+  font-size: 0.75rem;
+  color: #718096;
+}
+
+/* Quick actions styling */
+.quick-actions {
+  display: flex;
+  justify-content: space-around;
+  padding: 1rem;
+  background-color: #f7fafc;
+}
+
+.action-item {
+  text-align: center;
+  flex: 1; /* Make all action items take equal space */
+}
+
+/* Updated icon container to be round */
+.icon-container {
+  background-color: #ffffff; /* White background for the icon */
+  width: 60px; /* Fixed width */
+  height: 60px; /* Fixed height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%; /* Round shape */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin: 0 auto; /* Center icon horizontally */
+}
+
+/* Get started section styling (This section is removed) */
+.get-started {
+  display: none; /* Hide the section completely */
+}
+
+/* Transactions section styling */
+.transactions {
+  padding: 1rem;
+  text-align: center; /* Centered text */
+}
+
+.no-transactions {
+  color: #718096;
+}
+
+/* Footer styling */
+.footer {
+  display: flex;
+  justify-content: space-around;
+  padding: 1rem;
+  background-color: #f7fafc;
+}
+
+.footer-item {
+  text-align: center;
+}
+
+.footer-item i {
+  font-size: 1.5rem;
+}
+
+/* Remove unnecessary styling for deleted sections */
+.action-list,
+.add-money-section,
+.debit-card-section {
+  display: none;
+}

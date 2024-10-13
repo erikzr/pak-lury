@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard Pembayaran</title>
+    <link rel="stylesheet" href="home.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+    />
+    <style>
+      /* Tambahkan ini di dalam tag <style> di head atau di file CSS Anda */
+      .no-underline {
+        text-decoration: none; /* Menghilangkan garis bawah pada link */
+        color: black; /* Mengatur warna teks menjadi hitam */
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard-container">
+      <div class="header">
+        <div class="header-text">
+          <p class="welcome">Hai, Victor Jimoh</p>
+          <p class="subtext">Selamat datang, mari mulai melakukan pembayaran</p>
+        </div>
+        <div class="header-icons">
+          <i class="fas fa-bell"></i>
+          <i class="fas fa-cog"></i>
+        </div>
+      </div>
+      <div class="balance-section">
+        <p class="balance-label">Total Saldo</p>
+        <p class="balance-amount">Rp20.000.000,00</p>
+        <p class="balance-updated">Terakhir diperbarui 2 menit yang lalu</p>
+      </div>
+      <div class="quick-actions">
+        <div class="action-item">
+          <div class="icon-container">
+            <a href="topup.html"
+              ><i class="fas fa-plus" style="color: black"></i
+            ></a>
+            <!-- Ikon tetap warna hitam -->
+          </div>
+          <p><a href="topup.html" class="no-underline">Top Up Saldo</a></p>
+          <!-- Mengganti nama menjadi Top Up Saldo dengan warna hitam -->
+        </div>
+        <div class="action-item">
+          <div class="icon-container">
+            <i class="fas fa-user" style="color: black"></i>
+          </div>
+          <p>Profil</p>
+        </div>
+        <div class="action-item">
+          <div class="icon-container">
+            <i class="fas fa-paper-plane" style="color: black"></i>
+          </div>
+          <p>Kirim Uang</p>
+        </div>
+      </div>
+      <!-- Menghapus bagian mulai dan elemen terkait -->
+      <div class="transactions">
+        <p class="section-title">HARI INI</p>
+        <p class="no-transactions">Anda belum melakukan transaksi apapun.</p>
+      </div>
+      <div class="footer">
+        <div class="footer-item">
+          <i class="fas fa-home"></i>
+          <p>Beranda</p>
+        </div>
+        <div class="footer-item">
+          <i class="fas fa-paper-plane"></i>
+          <p>Kirim</p>
+        </div>
+        <div class="footer-item">
+          <i class="fas fa-credit-card"></i>
+          <p>Kartu</p>
+        </div>
+        <div class="footer-item">
+          <i class="fas fa-ellipsis-h"></i>
+          <p>Lainnya</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -2,6 +2,9 @@
 include 'config.php';
 session_start();
 
+// Set timezone to Indonesia (Jakarta)
+date_default_timezone_set('Asia/Jakarta');
+
 if (!isset($_SESSION['customer_id'])) {
     header("Location: login.php");
     exit();
@@ -108,7 +111,7 @@ foreach ($accounts as $account) {
 
         <!-- Footer Navigation -->
         <div class="bg-white border-t flex justify-around py-2 fixed bottom-0 left-0 right-0 md:relative">
-            <a href="dashboard.php" class="flex flex-col items-center no-underline text-blue-500">
+            <a href="index.php" class="flex flex-col items-center no-underline text-blue-500">
                 <i class="fas fa-home text-xl"></i>
                 <p class="text-xs mt-1">Beranda</p>
             </a>
@@ -116,9 +119,9 @@ foreach ($accounts as $account) {
                 <i class="fas fa-paper-plane text-xl"></i>
                 <p class="text-xs mt-1">Kirim</p>
             </a>
-            <a href="transaction_history.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
-                <i class="fas fa-history text-xl"></i>
-                <p class="text-xs mt-1">Riwayat</p>
+            <a href="cards.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-credit-card text-xl"></i>
+                <p class="text-xs mt-1">Kartu</p>
             </a>
             <a href="logout.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
                 <i class="fas fa-sign-out-alt text-xl"></i>
