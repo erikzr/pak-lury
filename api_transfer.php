@@ -1,10 +1,26 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST");
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+ini_set('log_errors', 1);
+ini_set('error_log', '/path/to/error.log'); // Sesuaikan path-nya
+
+header("Access-Control-Allow-Origin: *"); // Ganti * dengan domain yang diizinkan jika perlu
+header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
+
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    exit; // Hentikan eksekusi untuk preflight request
+}
+
 header('Content-Type: application/json');
 
 include '../config.php';
+
+if ($conn->connect_error) {
+    error_log("Koneksi database gagal: " . $conn->connect_error);
+    echo json_encode(['status' => 'error', 'message' => 'Gagal terhubung ke database']);
+    exit;
+}
 
 function validateInput($input) {
     return htmlspecialchars(trim($input));
@@ -19,13 +35,15 @@ function logTransaction($conn, $customer_id, $amount, $status, $from_account, $t
 $json = file_get_contents('php://input');
 $data = json_decode($json, true);
 
-if ($data === null) {
-    echo json_encode(['status' => 'error', 'message' => 'Data JSON tidak valid']);
+if (json_last_error() !== JSON_ERROR_NONE) {
+    error_log("JSON Error: " . json_last_error_msg());
+    echo json_encode(['status' => 'error', 'message' => 'Invalid JSON data']);
     exit;
 }
 
-if (!isset($data['customer_id']) || !is_numeric($data['customer_id'])) {
-    echo json_encode(['status' => 'error', 'message' => 'ID pelanggan tidak valid']);
+if (!isset($data['customer_id']) || !is_numeric($data['customer_id']) ||
+    !isset($data['from_account']) || !isset($data['to_account']) || !isset($data['amount'])) {
+    echo json_encode(['status' => 'error', 'message' => 'Data transfer tidak lengkap']);
     exit;
 }
 
@@ -42,6 +60,8 @@ if ($amount <= 0) {
 $conn->begin_transaction();
 
 try {
+    error_log("Memulai transaksi transfer. Dari: $from_account, Ke: $to_account, Jumlah: $amount");
+
     // Periksa dan kurangi saldo akun pengirim
     $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
     $stmt->bind_param("si", $from_account, $customer_id);
@@ -50,6 +70,7 @@ try {
     
     if ($row = $result->fetch_assoc()) {
         $available_balance = $row['available_balance'];
+        error_log("Saldo tersedia: $available_balance, Jumlah transfer: $amount");
         if ($available_balance < $amount) {
             throw new Exception("Saldo tidak mencukupi");
         }
@@ -58,6 +79,11 @@ try {
         $update_stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE account_number = ?");
         $update_stmt->bind_param("ds", $new_balance, $from_account);
         $update_stmt->execute();
+        if ($update_stmt->affected_rows == 0) {
+            error_log("Gagal memperbarui saldo pengirim");
+            throw new Exception("Gagal memperbarui saldo pengirim");
+        }
+        error_log("Saldo pengirim berhasil diperbarui. Saldo baru: $new_balance");
     } else {
         throw new Exception("Akun pengirim tidak ditemukan");
     }
@@ -78,14 +104,17 @@ try {
     if ($stmt->affected_rows == 0) {
         throw new Exception("Gagal memperbarui saldo penerima");
     }
+    error_log("Saldo penerima berhasil diperbarui");
 
     // Log transaksi sukses
     logTransaction($conn, $customer_id, $amount, 'success', $from_account, $to_account, 'TRANSFER');
 
     $conn->commit();
+    error_log("Transaksi berhasil di-commit");
     echo json_encode(['status' => 'success', 'message' => 'Transfer berhasil']);
 } catch (Exception $e) {
     $conn->rollback();
+    error_log("Error during transfer: " . $e->getMessage());
     logTransaction($conn, $customer_id, $amount, 'failed', $from_account, $to_account, 'TRANSFER', $e->getMessage());
     
     $errorMessage = $e->getMessage();
@@ -94,7 +123,11 @@ try {
     } elseif (strpos($errorMessage, "tidak ditemukan") !== false) {
         echo json_encode(['status' => 'error', 'message' => 'Akun tidak ditemukan']);
     } else {
-        echo json_encode(['status' => 'error', 'message' => 'Terjadi kesalahan saat melakukan transfer']);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Terjadi kesalahan saat melakukan transfer',
+            'detail' => $errorMessage
+        ]);
     }
 } finally {
     $conn->close();
