@@ -12,18 +12,33 @@ $message = "";
 $message_type = "info";
 $minimum_balance = 25000; // Minimum balance in Rupiah
 
-// Fungsi untuk memvalidasi input
+// Fungsi-fungsi helper
 function validateInput($input) {
     return htmlspecialchars(trim($input));
 }
 
-// Fungsi untuk mengkonversi format mata uang ke angka
 function currencyToNumber($amount) {
     $amount = str_replace('Rp ', '', $amount);
     $amount = str_replace('.', '', $amount);
     $amount = str_replace(',', '.', $amount);
     return (float) $amount;
 }
+
+function formatCurrency($amount) {
+    return 'Rp ' . number_format($amount, 0, ',', '.');
+}
+
+// Ambil daftar server dari database atau file konfigurasi
+function getServers() {
+    // Implementasi sesuai dengan struktur data Anda
+    return [
+        'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/api_transfer.php'],
+        'server2' => ['name' => 'Server 2', 'url' => 'http://server2.example.com/api_transfer.php'],
+        // Tambahkan server lain sesuai kebutuhan
+    ];
+}
+
+$servers = getServers();
 
 // Ambil daftar akun customer untuk dropdown
 $stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
@@ -36,60 +51,75 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $from_account_number = validateInput($_POST['from_account']);
     $to_account_number = validateInput($_POST['to_account']);
     $amount = currencyToNumber($_POST['amount']);
+    $server_key = validateInput($_POST['server']);
 
     if ($amount <= 0) {
         $message = "Jumlah transfer harus lebih dari 0!";
         $message_type = "danger";
     } else {
-        // Validasi akun asal
-        $stmt = $conn->prepare("SELECT id, available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
+        // Validasi saldo
+        $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ?");
         $stmt->bind_param("si", $from_account_number, $customer_id);
         $stmt->execute();
-        $from_account = $stmt->get_result()->fetch_assoc();
-
-        if (!$from_account) {
-            $message = "Akun asal tidak ditemukan!";
-            $message_type = "danger";
-        } elseif ($from_account['available_balance'] - $amount < $minimum_balance) {
-            $message = "Saldo minimal yang harus tersisa adalah Rp " . number_format($minimum_balance, 0, ',', '.') . "!";
-            $message_type = "danger";
-        } else {
-            $conn->begin_transaction();
-            
-            try {
-                // Kurangi saldo akun asal
-                $new_balance_from = $from_account['available_balance'] - $amount;
-                $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE id = ?");
-                $stmt->bind_param("di", $new_balance_from, $from_account['id']);
-                $stmt->execute();
-
-                // Simpan data transaksi
-                $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number, transaction_type) VALUES (?, ?, ?, NOW(), ?, ?, 'TRANSFER')");
-                $status = 'success';
-                $stmt->bind_param("idsss", $customer_id, $amount, $status, $from_account_number, $to_account_number);
-                $stmt->execute();
-
-                $conn->commit();
-                $message = "Transfer berhasil! Saldo telah dipotong dari akun Anda.";
-                $message_type = "success";
-                
-                // Refresh daftar akun setelah transaksi
-                $stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
-                $stmt->bind_param("i", $customer_id);
-                $stmt->execute();
-                $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = "Terjadi kesalahan dalam proses transfer: " . $e->getMessage();
+        $result = $stmt->get_result();
+        if ($row = $result->fetch_assoc()) {
+            $available_balance = $row['available_balance'];
+            if ($available_balance - $amount < $minimum_balance) {
+                $message = "Saldo tidak mencukupi. Saldo minimal yang harus tersisa adalah " . formatCurrency($minimum_balance);
                 $message_type = "danger";
+            } else {
+                // Proses transfer
+                $transfer_data = [
+                    'from_account' => $from_account_number,
+                    'to_account' => $to_account_number,
+                    'amount' => $amount,
+                    'customer_id' => $customer_id
+                ];
+
+                $server_url = $servers[$server_key]['url'];
+                $response = callTransferAPI($server_url, $transfer_data);
+
+                if ($response['status'] == 'success') {
+                    $message = "Transfer berhasil! " . $response['message'];
+                    $message_type = "success";
+                    
+                    // Update saldo lokal jika transfer ke server lokal
+                    if ($server_key == 'local') {
+                        $new_balance = $available_balance - $amount;
+                        $update_stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE account_number = ?");
+                        $update_stmt->bind_param("ds", $new_balance, $from_account_number);
+                        $update_stmt->execute();
+                    }
+                    
+                    // Refresh daftar akun
+                    $stmt->execute();
+                    $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                } else {
+                    $message = "Gagal melakukan transfer: " . $response['message'];
+                    $message_type = "danger";
+                }
             }
+        } else {
+            $message = "Akun tidak ditemukan";
+            $message_type = "danger";
         }
     }
 }
 
-// Fungsi untuk memformat angka ke format mata uang
-function formatCurrency($amount) {
-    return 'Rp ' . number_format($amount, 0, ',', '.');
+function callTransferAPI($url, $data) {
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST',
+            'content' => json_encode($data)
+        ]
+    ];
+    $context  = stream_context_create($options);
+    $result = file_get_contents($url, false, $context);
+    if ($result === FALSE) {
+        return ['status' => 'error', 'message' => 'Gagal terhubung ke server'];
+    }
+    return json_decode($result, true);
 }
 
 // Ambil saldo total
@@ -143,6 +173,16 @@ $total_balance = $result->fetch_assoc()['total_balance'];
                                 <?= htmlspecialchars($account['account_type']) ?> 
                                 (Saldo: <?= formatCurrency($account['available_balance']) ?>)
                             </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <!-- Server Tujuan -->
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="server">Server Tujuan</label>
+                    <select name="server" id="server" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                        <?php foreach ($servers as $key => $server): ?>
+                            <option value="<?= htmlspecialchars($key) ?>"><?= htmlspecialchars($server['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

@@ -1,143 +1,86 @@
 <?php
-// File: transfer_api.php (gunakan file ini di kedua sistem)
+include 'config.php';
+header('Content-Type: application/json');
 
-// Konfigurasi database (sesuaikan dengan konfigurasi masing-masing sistem)
-$db_config = [
-    'host' => 'localhost',
-    'user' => 'root',
-    'pass' => '',
-    'name' => 'ebanking'
-];
-
-$conn = new mysqli($db_config['host'], $db_config['user'], $db_config['pass'], $db_config['name']);
-
-if ($conn->connect_error) {
-    die("Koneksi database gagal: " . $conn->connect_error);
+// Fungsi untuk memvalidasi input
+function validateInput($input) {
+    return htmlspecialchars(trim($input));
 }
 
-// Fungsi untuk memproses transfer masuk
-function terimaTransfer($data) {
-    global $conn;
-    
-    $akun_tujuan = $data['akun_tujuan'];
-    $jumlah = $data['jumlah'];
-    $id_transaksi = $data['id_transaksi'];
-    
-    // Validasi akun tujuan
-    $stmt = $conn->prepare("SELECT id FROM akun WHERE nomor_akun = ?");
-    $stmt->bind_param("s", $akun_tujuan);
+// Fungsi untuk log transaksi
+function logTransaction($conn, $customer_id, $amount, $status, $from_account, $to_account, $transaction_type) {
+    $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_amount, status, transaction_date, from_account_number, to_account_number, transaction_type) VALUES (?, ?, ?, NOW(), ?, ?, ?)");
+    $stmt->bind_param("idssss", $customer_id, $amount, $status, $from_account, $to_account, $transaction_type);
+    $stmt->execute();
+}
+
+// Terima data JSON
+$json = file_get_contents('php://input');
+$data = json_decode($json, true);
+
+if ($data === null) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid JSON data']);
+    exit;
+}
+
+// Validasi data yang diterima
+$from_account = validateInput($data['from_account']);
+$to_account = validateInput($data['to_account']);
+$amount = floatval($data['amount']);
+$customer_id = intval($data['customer_id']);
+
+if ($amount <= 0) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid amount']);
+    exit;
+}
+
+// Mulai transaksi database
+$conn->begin_transaction();
+
+try {
+    // Periksa dan kurangi saldo akun pengirim
+    $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ? FOR UPDATE");
+    $stmt->bind_param("si", $from_account, $customer_id);
     $stmt->execute();
     $result = $stmt->get_result();
     
-    if ($result->num_rows === 0) {
-        return ['status' => 'gagal', 'pesan' => 'Akun tujuan tidak ditemukan'];
-    }
-    
-    // Proses penambahan saldo
-    $conn->begin_transaction();
-    try {
-        $stmt = $conn->prepare("UPDATE akun SET saldo = saldo + ? WHERE nomor_akun = ?");
-        $stmt->bind_param("ds", $jumlah, $akun_tujuan);
-        $stmt->execute();
+    if ($row = $result->fetch_assoc()) {
+        $available_balance = $row['available_balance'];
+        if ($available_balance < $amount) {
+            throw new Exception("Insufficient balance");
+        }
         
-        $stmt = $conn->prepare("INSERT INTO transaksi (id_transaksi, akun_tujuan, jumlah, tipe) VALUES (?, ?, ?, 'masuk')");
-        $stmt->bind_param("ssd", $id_transaksi, $akun_tujuan, $jumlah);
-        $stmt->execute();
-        
-        $conn->commit();
-        return ['status' => 'sukses', 'pesan' => 'Transfer berhasil diterima'];
-    } catch (Exception $e) {
-        $conn->rollback();
-        return ['status' => 'gagal', 'pesan' => 'Gagal memproses transfer: ' . $e->getMessage()];
+        $new_balance = $available_balance - $amount;
+        $update_stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE account_number = ?");
+        $update_stmt->bind_param("ds", $new_balance, $from_account);
+        $update_stmt->execute();
+    } else {
+        throw new Exception("Sender account not found");
     }
-}
 
-// Fungsi untuk mengirim transfer
-function kirimTransfer($akun_asal, $akun_tujuan, $jumlah) {
-    global $conn;
-    
-    // Validasi saldo akun asal
-    $stmt = $conn->prepare("SELECT saldo FROM akun WHERE nomor_akun = ? FOR UPDATE");
-    $stmt->bind_param("s", $akun_asal);
+    // Tambah saldo akun penerima
+    $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance + ? WHERE account_number = ?");
+    $stmt->bind_param("ds", $amount, $to_account);
     $stmt->execute();
-    $result = $stmt->get_result();
     
-    if ($result->num_rows === 0) {
-        return ['status' => 'gagal', 'pesan' => 'Akun asal tidak ditemukan'];
+    if ($stmt->affected_rows == 0) {
+        throw new Exception("Recipient account not found");
     }
-    
-    $saldo = $result->fetch_assoc()['saldo'];
-    if ($saldo < $jumlah) {
-        return ['status' => 'gagal', 'pesan' => 'Saldo tidak mencukupi'];
-    }
-    
-    // Proses pengurangan saldo dan kirim ke sistem lain
-    $conn->begin_transaction();
-    try {
-        $stmt = $conn->prepare("UPDATE akun SET saldo = saldo - ? WHERE nomor_akun = ?");
-        $stmt->bind_param("ds", $jumlah, $akun_asal);
-        $stmt->execute();
-        
-        $id_transaksi = uniqid();
-        $stmt = $conn->prepare("INSERT INTO transaksi (id_transaksi, akun_asal, akun_tujuan, jumlah, tipe) VALUES (?, ?, ?, ?, 'keluar')");
-        $stmt->bind_param("sssd", $id_transaksi, $akun_asal, $akun_tujuan, $jumlah);
-        $stmt->execute();
-        
-        // Kirim ke sistem lain
-        $data = [
-            'akun_tujuan' => $akun_tujuan,
-            'jumlah' => $jumlah,
-            'id_transaksi' => $id_transaksi
-        ];
-        
-        $url = 'http://sistem-lain.com/transfer_api.php'; // Ganti dengan URL sistem lain
-        $options = [
-            'http' => [
-                'header'  => "Content-type: application/json\r\n",
-                'method'  => 'POST',
-                'content' => json_encode($data)
-            ]
-        ];
-        $context  = stream_context_create($options);
-        $result = file_get_contents($url, false, $context);
-        
-        if ($result === FALSE) {
-            throw new Exception("Gagal mengirim ke sistem lain");
-        }
-        
-        $response = json_decode($result, true);
-        if ($response['status'] !== 'sukses') {
-            throw new Exception($response['pesan']);
-        }
-        
-        $conn->commit();
-        return ['status' => 'sukses', 'pesan' => 'Transfer berhasil dikirim'];
-    } catch (Exception $e) {
-        $conn->rollback();
-        return ['status' => 'gagal', 'pesan' => 'Gagal memproses transfer: ' . $e->getMessage()];
-    }
-}
 
-// Handle request
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $json = file_get_contents('php://input');
-    $data = json_decode($json, true);
+    // Log transaksi
+    logTransaction($conn, $customer_id, $amount, 'success', $from_account, $to_account, 'TRANSFER');
+
+    // Commit transaksi
+    $conn->commit();
+    echo json_encode(['status' => 'success', 'message' => 'Transfer successful']);
+} catch (Exception $e) {
+    // Rollback jika terjadi error
+    $conn->rollback();
     
-    if (isset($data['akun_tujuan']) && isset($data['jumlah']) && isset($data['id_transaksi'])) {
-        $hasil = terimaTransfer($data);
-    } else {
-        $hasil = ['status' => 'gagal', 'pesan' => 'Data tidak lengkap'];
-    }
-    
-    header('Content-Type: application/json');
-    echo json_encode($hasil);
-} elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    // Contoh penggunaan untuk mengirim transfer (biasanya dipanggil dari antarmuka pengguna)
-    if (isset($_GET['kirim'])) {
-        $hasil = kirimTransfer('1234567890', '0987654321', 1000000);
-        echo json_encode($hasil);
-    } else {
-        echo "API Transfer Saldo";
-    }
+    // Log transaksi gagal
+    logTransaction($conn, $customer_id, $amount, 'failed', $from_account, $to_account, 'TRANSFER');
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+} finally {
+    $conn->close();
 }
 ?>
