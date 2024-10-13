@@ -22,11 +22,14 @@ $transactionType = isset($_GET['transaction_type']) ? $_GET['transaction_type'] 
 // Base WHERE clause
 $whereClause = "WHERE (c_sender.m_customer_id = ? OR c_receiver.m_customer_id = ?)";
 $params = [$customer_id, $customer_id];
+$types = 'ii'; // for customer_id in WHERE clause
 
+// Add date filter
 if ($dateFrom && $dateTo) {
     $whereClause .= " AND t.transaction_date BETWEEN ? AND ?";
     $params[] = $dateFrom;
     $params[] = $dateTo;
+    $types .= 'ss'; // for dateFrom and dateTo
 }
 
 // Add transaction type filter
@@ -36,15 +39,18 @@ if ($transactionType) {
             $whereClause .= " AND c_receiver.m_customer_id = ? AND c_sender.m_customer_id != ?";
             $params[] = $customer_id;
             $params[] = $customer_id;
+            $types .= 'ii';
             break;
         case 'Keluar':
             $whereClause .= " AND c_sender.m_customer_id = ? AND c_receiver.m_customer_id != ?";
             $params[] = $customer_id;
             $params[] = $customer_id;
+            $types .= 'ii';
             break;
         case 'Topup':
             $whereClause .= " AND c_sender.m_customer_id = c_receiver.m_customer_id AND c_sender.m_customer_id = ?";
             $params[] = $customer_id;
+            $types .= 'i';
             break;
     }
 }
@@ -242,24 +248,26 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             </a>
         </div>
     </div>
+</body>
+</html>
 
-    <?php
-    function getTransactionBadgeClass($type) {
-        switch ($type) {
-            case 'Topup':
+<?php
+function getTransactionBadgeClass($type) {
+    switch ($type) {
+        case 'Topup':
                 return 'bg-green-100 text-green-800';
-            case 'Masuk':
+        case 'Masuk':
                 return 'bg-blue-100 text-blue-800';
-            case 'Keluar':
+        case 'Keluar':
                 return 'bg-red-100 text-red-800';
-            default:
+        default:
                 return 'bg-gray-100 text-gray-800';
         }
     }
 
     function formatCurrency($amount) {
         return 'Rp ' . number_format($amount, 2, ',', '.');
-    }
-    ?>
+}
+?>
 </body>
 </html>
