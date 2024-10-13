@@ -33,7 +33,7 @@ function getServers() {
     // Implementasi sesuai dengan struktur data Anda
     return [
         'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/api_transfer.php'],
-        'server2' => ['name' => 'Server 2', 'url' => 'http://server2.example.com/api_transfer.php'],
+        'server2' => ['name' => 'Server 2', 'url' => 'http://172.20.10.2/api_transfer.php'],
         // Tambahkan server lain sesuai kebutuhan
     ];
 }
