@@ -4,9 +4,9 @@
 // Konfigurasi database (sesuaikan dengan konfigurasi masing-masing sistem)
 $db_config = [
     'host' => 'localhost',
-    'user' => 'username_db',
-    'pass' => 'password_db',
-    'name' => 'nama_database'
+    'user' => 'root',
+    'pass' => '',
+    'name' => 'ebanking'
 ];
 
 $conn = new mysqli($db_config['host'], $db_config['user'], $db_config['pass'], $db_config['name']);
