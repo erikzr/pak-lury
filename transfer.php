@@ -29,15 +29,52 @@ function formatCurrency($amount) {
 
 function getServers() {
     return [
-        'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/api_transfer.php'],
-        'server2' => ['name' => 'Server 2', 'url' => 'http://172.20.10.2/pak-lury/api_transfer.php'],
+        'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/pak-lury/api_transfer.php'],
+        'server2' => ['name' => 'Server 2', 'url' => 'http://192.168.9.27/pak-lury/api_transfer.php'],
     ];
+}
+
+function callTransferAPI($url, $data) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10); // Set timeout 10 detik
+    
+    $result = curl_exec($ch);
+    
+    if ($result === FALSE) {
+        $error = curl_error($ch);
+        $errno = curl_errno($ch);
+        curl_close($ch);
+        error_log("Panggilan API gagal: $error (Kode error: $errno)");
+        return ['status' => 'error', 'message' => "Gagal terhubung ke server: $error"];
+    }
+    
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if ($http_code != 200) {
+        error_log("API mengembalikan kode status bukan 200: $http_code");
+        return ['status' => 'error', 'message' => "Server merespon dengan kode status tidak valid: $http_code"];
+    }
+    
+    $response = json_decode($result, true);
+    
+    if (!is_array($response) || !isset($response['status'])) {
+        error_log("Respon API tidak valid: " . print_r($result, true));
+        return ['status' => 'error', 'message' => 'Respon dari API tidak valid'];
+    }
+    
+    return $response;
 }
 
 function transferAntarServer($from_account, $to_account, $amount, $source_server, $destination_server) {
     global $conn, $customer_id;
     
-    // Mulai transaksi database
+    error_log("Mencoba transfer antar server: Dari $from_account ke $to_account, Jumlah: $amount, Tujuan: $destination_server");
+    
     $conn->begin_transaction();
 
     try {
@@ -51,15 +88,14 @@ function transferAntarServer($from_account, $to_account, $amount, $source_server
             $stmt->bind_param("ds", $amount, $to_account);
             $stmt->execute();
 
-            // Catat transaksi ke t_transaction
             $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_type, transaction_amount, from_account_number, to_account_number, transaction_date, status, description) VALUES (?, 'TF', ?, ?, ?, NOW(), 'SUCCESS', 'Transfer lokal')");
             $stmt->bind_param("idss", $customer_id, $amount, $from_account, $to_account);
             $stmt->execute();
 
             $conn->commit();
+            error_log("Transfer lokal berhasil");
             return ['status' => 'success', 'message' => 'Transfer lokal berhasil'];
         } else {
-            // Transfer ke server lain
             $transfer_data = [
                 'from_account' => $from_account,
                 'to_account' => $to_account,
@@ -68,21 +104,22 @@ function transferAntarServer($from_account, $to_account, $amount, $source_server
             ];
 
             $servers = getServers();
+            if (!isset($servers[$destination_server]) || !isset($servers[$destination_server]['url'])) {
+                throw new Exception('Server tujuan tidak valid atau URL tidak ditemukan');
+            }
             $api_url = $servers[$destination_server]['url'];
             $response = callTransferAPI($api_url, $transfer_data);
-
             if ($response['status'] == 'success') {
-                // Kurangi saldo di server lokal
                 $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance - ? WHERE account_number = ?");
                 $stmt->bind_param("ds", $amount, $from_account);
                 $stmt->execute();
 
-                // Catat transaksi ke t_transaction
                 $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_type, transaction_amount, from_account_number, to_account_number, transaction_date, status, description) VALUES (?, 'TF', ?, ?, ?, NOW(), 'SUCCESS', 'Transfer antar server')");
                 $stmt->bind_param("idss", $customer_id, $amount, $from_account, $to_account);
                 $stmt->execute();
 
                 $conn->commit();
+                error_log("Transfer antar server berhasil");
                 return ['status' => 'success', 'message' => 'Transfer antar server berhasil'];
             } else {
                 throw new Exception('Gagal melakukan transfer: ' . $response['message']);
@@ -90,24 +127,9 @@ function transferAntarServer($from_account, $to_account, $amount, $source_server
         }
     } catch (Exception $e) {
         $conn->rollback();
+        error_log("Transfer gagal: " . $e->getMessage());
         return ['status' => 'error', 'message' => $e->getMessage()];
     }
-}
-
-function callTransferAPI($url, $data) {
-    $options = [
-        'http' => [
-            'header'  => "Content-type: application/json\r\n",
-            'method'  => 'POST',
-            'content' => json_encode($data)
-        ]
-    ];
-    $context  = stream_context_create($options);
-    $result = file_get_contents($url, false, $context);
-    if ($result === FALSE) {
-        return ['status' => 'error', 'message' => 'Gagal terhubung ke server'];
-    }
-    return json_decode($result, true);
 }
 
 $servers = getServers();
