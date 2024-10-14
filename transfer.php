@@ -10,9 +10,8 @@ if (!isset($_SESSION['customer_id'])) {
 $customer_id = $_SESSION['customer_id'];
 $message = "";
 $message_type = "info";
-$minimum_balance = 25000; // Minimum balance in Rupiah
+$minimum_balance = 25000;
 
-// Fungsi-fungsi helper
 function validateInput($input) {
     return htmlspecialchars(trim($input));
 }
@@ -28,81 +27,70 @@ function formatCurrency($amount) {
     return 'Rp ' . number_format($amount, 0, ',', '.');
 }
 
-// Ambil daftar server dari database atau file konfigurasi
 function getServers() {
-    // Implementasi sesuai dengan struktur data Anda
     return [
         'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/api_transfer.php'],
         'server2' => ['name' => 'Server 2', 'url' => 'http://172.20.10.2/pak-lury/api_transfer.php'],
-        // Tambahkan server lain sesuai kebutuhan
     ];
 }
 
-$servers = getServers();
+function transferAntarServer($from_account, $to_account, $amount, $source_server, $destination_server) {
+    global $conn, $customer_id;
+    
+    // Mulai transaksi database
+    $conn->begin_transaction();
 
-// Ambil daftar akun customer untuk dropdown
-$stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
-$stmt->bind_param("i", $customer_id);
-$stmt->execute();
-$accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    try {
+        if ($destination_server == 'local') {
+            // Proses transfer lokal
+            $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance - ? WHERE account_number = ?");
+            $stmt->bind_param("ds", $amount, $from_account);
+            $stmt->execute();
 
-// Proses form jika ada pengiriman data
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $from_account_number = validateInput($_POST['from_account']);
-    $to_account_number = validateInput($_POST['to_account']);
-    $amount = currencyToNumber($_POST['amount']);
-    $server_key = validateInput($_POST['server']);
+            $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance + ? WHERE account_number = ?");
+            $stmt->bind_param("ds", $amount, $to_account);
+            $stmt->execute();
 
-    if ($amount <= 0) {
-        $message = "Jumlah transfer harus lebih dari 0!";
-        $message_type = "danger";
-    } else {
-        // Validasi saldo
-        $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ?");
-        $stmt->bind_param("si", $from_account_number, $customer_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($row = $result->fetch_assoc()) {
-            $available_balance = $row['available_balance'];
-            if ($available_balance - $amount < $minimum_balance) {
-                $message = "Saldo tidak mencukupi. Saldo minimal yang harus tersisa adalah " . formatCurrency($minimum_balance);
-                $message_type = "danger";
-            } else {
-                // Proses transfer
-                $transfer_data = [
-                    'from_account' => $from_account_number,
-                    'to_account' => $to_account_number,
-                    'amount' => $amount,
-                    'customer_id' => $customer_id
-                ];
+            // Catat transaksi ke t_transaction
+            $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_type, transaction_amount, from_account_number, to_account_number, transaction_date, status, description) VALUES (?, 'TF', ?, ?, ?, NOW(), 'SUCCESS', 'Transfer lokal')");
+            $stmt->bind_param("idss", $customer_id, $amount, $from_account, $to_account);
+            $stmt->execute();
 
-                $server_url = $servers[$server_key]['url'];
-                $response = callTransferAPI($server_url, $transfer_data);
-
-                if ($response['status'] == 'success') {
-                    $message = "Transfer berhasil! " . $response['message'];
-                    $message_type = "success";
-                    
-                    // Update saldo lokal jika transfer ke server lokal
-                    if ($server_key == 'local') {
-                        $new_balance = $available_balance - $amount;
-                        $update_stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = ? WHERE account_number = ?");
-                        $update_stmt->bind_param("ds", $new_balance, $from_account_number);
-                        $update_stmt->execute();
-                    }
-                    
-                    // Refresh daftar akun
-                    $stmt->execute();
-                    $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                } else {
-                    $message = "Gagal melakukan transfer: " . $response['message'];
-                    $message_type = "danger";
-                }
-            }
+            $conn->commit();
+            return ['status' => 'success', 'message' => 'Transfer lokal berhasil'];
         } else {
-            $message = "Akun tidak ditemukan";
-            $message_type = "danger";
+            // Transfer ke server lain
+            $transfer_data = [
+                'from_account' => $from_account,
+                'to_account' => $to_account,
+                'amount' => $amount,
+                'source_server' => $source_server
+            ];
+
+            $servers = getServers();
+            $api_url = $servers[$destination_server]['url'];
+            $response = callTransferAPI($api_url, $transfer_data);
+
+            if ($response['status'] == 'success') {
+                // Kurangi saldo di server lokal
+                $stmt = $conn->prepare("UPDATE m_portfolio_account SET available_balance = available_balance - ? WHERE account_number = ?");
+                $stmt->bind_param("ds", $amount, $from_account);
+                $stmt->execute();
+
+                // Catat transaksi ke t_transaction
+                $stmt = $conn->prepare("INSERT INTO t_transaction (m_customer_id, transaction_type, transaction_amount, from_account_number, to_account_number, transaction_date, status, description) VALUES (?, 'TF', ?, ?, ?, NOW(), 'SUCCESS', 'Transfer antar server')");
+                $stmt->bind_param("idss", $customer_id, $amount, $from_account, $to_account);
+                $stmt->execute();
+
+                $conn->commit();
+                return ['status' => 'success', 'message' => 'Transfer antar server berhasil'];
+            } else {
+                throw new Exception('Gagal melakukan transfer: ' . $response['message']);
+            }
         }
+    } catch (Exception $e) {
+        $conn->rollback();
+        return ['status' => 'error', 'message' => $e->getMessage()];
     }
 }
 
@@ -122,7 +110,53 @@ function callTransferAPI($url, $data) {
     return json_decode($result, true);
 }
 
-// Ambil saldo total
+$servers = getServers();
+
+$stmt = $conn->prepare("SELECT account_number, account_type, available_balance FROM m_portfolio_account WHERE m_customer_id = ?");
+$stmt->bind_param("i", $customer_id);
+$stmt->execute();
+$accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $from_account_number = validateInput($_POST['from_account']);
+    $to_account_number = validateInput($_POST['to_account']);
+    $amount = currencyToNumber($_POST['amount']);
+    $server_key = validateInput($_POST['server']);
+
+    if ($amount <= 0) {
+        $message = "Jumlah transfer harus lebih dari 0!";
+        $message_type = "danger";
+    } else {
+        $stmt = $conn->prepare("SELECT available_balance FROM m_portfolio_account WHERE account_number = ? AND m_customer_id = ?");
+        $stmt->bind_param("si", $from_account_number, $customer_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($row = $result->fetch_assoc()) {
+            $available_balance = $row['available_balance'];
+            if ($available_balance - $amount < $minimum_balance) {
+                $message = "Saldo tidak mencukupi. Saldo minimal yang harus tersisa adalah " . formatCurrency($minimum_balance);
+                $message_type = "danger";
+            } else {
+                $result = transferAntarServer($from_account_number, $to_account_number, $amount, 'local', $server_key);
+
+                if ($result['status'] == 'success') {
+                    $message = "Transfer berhasil! " . $result['message'];
+                    $message_type = "success";
+                    
+                    $stmt->execute();
+                    $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                } else {
+                    $message = "Gagal melakukan transfer: " . $result['message'];
+                    $message_type = "danger";
+                }
+            }
+        } else {
+            $message = "Akun tidak ditemukan";
+            $message_type = "danger";
+        }
+    }
+}
+
 $stmt = $conn->prepare("SELECT SUM(available_balance) as total_balance FROM m_portfolio_account WHERE m_customer_id = ?");
 $stmt->bind_param("i", $customer_id);
 $stmt->execute();
@@ -141,7 +175,6 @@ $total_balance = $result->fetch_assoc()['total_balance'];
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
     <div class="w-full max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden">
-        <!-- Header -->
         <div class="bg-blue-600 text-white p-4">
             <div class="flex items-center mb-4">
                 <a href="dashboard.php" class="text-white"><i class="fas fa-arrow-left text-xl"></i></a>
@@ -161,9 +194,7 @@ $total_balance = $result->fetch_assoc()['total_balance'];
                 </div>
             <?php endif; ?>
 
-            <!-- Form -->
             <form method="POST" action="">
-                <!-- Dari Akun -->
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="from_account">Dari Akun</label>
                     <select name="from_account" id="from_account" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" required>
@@ -177,7 +208,6 @@ $total_balance = $result->fetch_assoc()['total_balance'];
                     </select>
                 </div>
 
-                <!-- Server Tujuan -->
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="server">Server Tujuan</label>
                     <select name="server" id="server" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" required>
@@ -187,13 +217,11 @@ $total_balance = $result->fetch_assoc()['total_balance'];
                     </select>
                 </div>
 
-                <!-- Nomor Rekening -->
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="to_account">Nomor Rekening</label>
                     <input class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" type="text" name="to_account" id="to_account" placeholder="Nomor Rekening" required />
                 </div>
 
-                <!-- Jumlah Transfer -->
                 <div class="mb-6">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="amount">Jumlah Transfer</label>
                     <div class="relative">
@@ -202,7 +230,6 @@ $total_balance = $result->fetch_assoc()['total_balance'];
                     </div>
                 </div>
 
-                <!-- Continue Button -->
                 <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:shadow-outline">
                     Lanjutkan
                 </button>
