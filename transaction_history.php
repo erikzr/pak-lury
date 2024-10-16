@@ -9,7 +9,7 @@ if (!isset($_SESSION['customer_id'])) {
 
 $customer_id = $_SESSION['customer_id'];
 
-// Paginasi
+// Pagination
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $perPage = 10;
 $start = ($page > 1) ? ($page * $perPage) - $perPage : 0;
@@ -20,35 +20,33 @@ $dateTo = isset($_GET['date_to']) ? $_GET['date_to'] : '';
 $transactionType = isset($_GET['transaction_type']) ? $_GET['transaction_type'] : '';
 
 // Base WHERE clause
-$whereClause = "WHERE (c_sender.m_customer_id = ? OR c_receiver.m_customer_id = ?)";
+$whereClause = "WHERE (t.from_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?)
+                OR t.to_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?)
+                OR t.transaction_type = 'TOPUP')";
 $params = [$customer_id, $customer_id];
 $types = 'ii'; // for customer_id in WHERE clause
 
 // Add date filter
 if ($dateFrom && $dateTo) {
     $whereClause .= " AND t.transaction_date BETWEEN ? AND ?";
-    $params[] = $dateFrom;
-    $params[] = $dateTo;
+    $params[] = $dateFrom . ' 00:00:00';
+    $params[] = $dateTo . ' 23:59:59';
     $types .= 'ss'; // for dateFrom and dateTo
 }
 
 // Add transaction type filter
 if ($transactionType) {
     switch($transactionType) {
+        case 'Topup':
+            $whereClause .= " AND t.transaction_type = 'TOPUP'";
+            break;
         case 'Masuk':
-            $whereClause .= " AND c_receiver.m_customer_id = ? AND c_sender.m_customer_id != ?";
+            $whereClause .= " AND t.to_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?) AND t.transaction_type != 'TOPUP'";
             $params[] = $customer_id;
-            $params[] = $customer_id;
-            $types .= 'ii';
+            $types .= 'i';
             break;
         case 'Keluar':
-            $whereClause .= " AND c_sender.m_customer_id = ? AND c_receiver.m_customer_id != ?";
-            $params[] = $customer_id;
-            $params[] = $customer_id;
-            $types .= 'ii';
-            break;
-        case 'Topup':
-            $whereClause .= " AND c_sender.m_customer_id = c_receiver.m_customer_id AND c_sender.m_customer_id = ?";
+            $whereClause .= " AND t.from_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?) AND t.transaction_type != 'TOPUP'";
             $params[] = $customer_id;
             $types .= 'i';
             break;
@@ -59,13 +57,10 @@ if ($transactionType) {
 $countQuery = "
     SELECT COUNT(*) as total 
     FROM t_transaction t
-    JOIN m_portfolio_account c_sender ON t.from_account_number = c_sender.account_number
-    JOIN m_portfolio_account c_receiver ON t.to_account_number = c_receiver.account_number
     $whereClause
 ";
 
 $stmt = $conn->prepare($countQuery);
-$types = str_repeat('i', count($params));
 $stmt->bind_param($types, ...$params);
 $stmt->execute();
 $totalRows = $stmt->get_result()->fetch_assoc()['total'];
@@ -78,22 +73,24 @@ $query = "
         t.transaction_amount,
         t.from_account_number,
         t.to_account_number,
-        sender.customer_name AS sender_name,
-        receiver.customer_name AS receiver_name,
+        t.transaction_type AS original_type,
+        COALESCE(sender.customer_name, 'System') AS sender_name,
+        COALESCE(receiver.customer_name, 'System') AS receiver_name,
         CASE 
-            WHEN c_sender.m_customer_id = c_receiver.m_customer_id THEN 'Topup'
-            WHEN c_sender.m_customer_id = ? THEN 'Keluar'
-            ELSE 'Masuk'
+            WHEN t.transaction_type = 'TOPUP' THEN 'Topup'
+            WHEN t.from_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?) THEN 'Keluar'
+            WHEN t.to_account_number IN (SELECT account_number FROM m_portfolio_account WHERE m_customer_id = ?) THEN 'Masuk'
+            ELSE 'Lainnya'
         END AS transaction_type
     FROM 
         t_transaction t
-    JOIN 
+    LEFT JOIN 
         m_portfolio_account c_sender ON t.from_account_number = c_sender.account_number
-    JOIN 
+    LEFT JOIN 
         m_portfolio_account c_receiver ON t.to_account_number = c_receiver.account_number
-    JOIN
+    LEFT JOIN
         m_customer sender ON c_sender.m_customer_id = sender.id
-    JOIN
+    LEFT JOIN
         m_customer receiver ON c_receiver.m_customer_id = receiver.id
     $whereClause
     ORDER BY 
@@ -102,12 +99,12 @@ $query = "
 ";
 
 // Add customer_id for CASE statement and pagination parameters
-array_unshift($params, $customer_id);
+array_unshift($params, $customer_id, $customer_id);
 $params[] = $start;
 $params[] = $perPage;
+$types = 'ii' . $types . 'ii';
 
 $stmt = $conn->prepare($query);
-$types = str_repeat('i', count($params));
 $stmt->bind_param($types, ...$params);
 $stmt->execute();
 $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -143,11 +140,11 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label for="date_from" class="block text-sm font-medium text-gray-700">Dari Tanggal</label>
-                    <input type="date" id="date_from" name="date_from" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= $dateFrom ?>">
+                    <input type="date" id="date_from" name="date_from" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateFrom) ?>">
                 </div>
                 <div>
                     <label for="date_to" class="block text-sm font-medium text-gray-700">Sampai Tanggal</label>
-                    <input type="date" id="date_to" name="date_to" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= $dateTo ?>">
+                    <input type="date" id="date_to" name="date_to" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateTo) ?>">
                 </div>
                 <div>
                     <label for="transaction_type" class="block text-sm font-medium text-gray-700">Jenis Transaksi</label>
@@ -194,6 +191,8 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                                         case 'Keluar':
                                             echo "Transfer ke " . htmlspecialchars($transaction['receiver_name']);
                                             break;
+                                        default:
+                                            echo "Transaksi Lainnya";
                                     }
                                     ?>
                                 </p>
@@ -219,7 +218,7 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                     <?php for ($i = 1; $i <= $totalPages; $i++): ?>
                         <li class="mx-1">
                             <a class="px-3 py-2 <?= $i == $page ? 'bg-blue-500 text-white' : 'bg-white text-blue-500' ?> rounded-lg" 
-                               href="?page=<?= $i ?>&date_from=<?= $dateFrom ?>&date_to=<?= $dateTo ?>&transaction_type=<?= $transactionType ?>">
+                               href="?page=<?= $i ?>&date_from=<?= htmlspecialchars($dateFrom) ?>&date_to=<?= htmlspecialchars($dateTo) ?>&transaction_type=<?= htmlspecialchars($transactionType) ?>">
                                 <?= $i ?>
                             </a>
                         </li>
@@ -255,19 +254,17 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 function getTransactionBadgeClass($type) {
     switch ($type) {
         case 'Topup':
-                return 'bg-green-100 text-green-800';
+            return 'bg-green-100 text-green-800';
         case 'Masuk':
-                return 'bg-blue-100 text-blue-800';
+            return 'bg-blue-100 text-blue-800';
         case 'Keluar':
-                return 'bg-red-100 text-red-800';
+            return 'bg-red-100 text-red-800';
         default:
-                return 'bg-gray-100 text-gray-800';
-        }
+            return 'bg-gray-100 text-gray-800';
     }
+}
 
-    function formatCurrency($amount) {
-        return 'Rp ' . number_format($amount, 2, ',', '.');
+function formatCurrency($amount) {
+    return 'Rp ' . number_format($amount, 2, ',', '.');
 }
 ?>
-</body>
-</html>
