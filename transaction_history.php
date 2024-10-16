@@ -111,17 +111,18 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 ?>
 
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Riwayat Transaksi</title>
+    <title>Riwayat Transaksi SwiftPay</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
     <style>
         @media (min-width: 640px) {
-            .transaction-container {
+            .dashboard-container {
                 max-width: 640px;
                 margin: 0 auto;
             }
@@ -129,22 +130,35 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     </style>
 </head>
 <body class="bg-gray-100">
-    <div class="transaction-container bg-white shadow-lg min-h-screen flex flex-col">
+    <div class="dashboard-container bg-white shadow-lg min-h-screen flex flex-col">
         <!-- Header -->
-        <div class="bg-blue-500 text-white p-4">
-            <h1 class="text-2xl font-bold">Riwayat Transaksi</h1>
+        <div class="bg-blue-500 text-white p-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold">Riwayat Transaksi</h1>
+                <p class="text-sm">Pantau aktivitas keuangan Anda</p>
+            </div>
+            <div class="space-x-4">
+                <a href="notifications.php" class="text-white"><i class="fas fa-bell text-xl"></i></a>
+                <a href="settings.php" class="text-white"><i class="fas fa-cog text-xl"></i></a>
+            </div>
         </div>
 
         <!-- Filter Form -->
-        <form method="GET" class="p-4 bg-gray-50">
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label for="date_from" class="block text-sm font-medium text-gray-700">Dari Tanggal</label>
-                    <input type="date" id="date_from" name="date_from" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateFrom) ?>">
-                </div>
-                <div>
-                    <label for="date_to" class="block text-sm font-medium text-gray-700">Sampai Tanggal</label>
-                    <input type="date" id="date_to" name="date_to" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateTo) ?>">
+        <div class="bg-white p-4 border-b">
+            <button id="filterToggle" class="w-full bg-blue-500 text-white py-2 px-4 rounded-lg flex justify-between items-center">
+                <span>Filter Transaksi</span>
+                <i class="fas fa-chevron-down"></i>
+            </button>
+            <form id="filterForm" method="GET" class="hidden mt-4 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="date_from" class="block text-sm font-medium text-gray-700">Dari Tanggal</label>
+                        <input type="date" id="date_from" name="date_from" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateFrom) ?>">
+                    </div>
+                    <div>
+                        <label for="date_to" class="block text-sm font-medium text-gray-700">Sampai Tanggal</label>
+                        <input type="date" id="date_to" name="date_to" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" value="<?= htmlspecialchars($dateTo) ?>">
+                    </div>
                 </div>
                 <div>
                     <label for="transaction_type" class="block text-sm font-medium text-gray-700">Jenis Transaksi</label>
@@ -155,19 +169,19 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                         <option value="Keluar" <?= $transactionType == 'Keluar' ? 'selected' : '' ?>>Keluar</option>
                     </select>
                 </div>
-                <div class="flex items-end">
+                <div class="flex justify-between">
                     <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                        Filter
+                        Terapkan Filter
                     </button>
-                    <a href="?" class="ml-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">
+                    <a href="?" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">
                         Reset
                     </a>
                 </div>
-            </div>
-        </form>
+            </form>
+        </div>
 
         <!-- Transactions List -->
-        <div class="flex-grow p-4">
+        <div class="flex-grow p-4 overflow-y-auto">
             <?php if (empty($transactions)): ?>
                 <div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4" role="alert">
                     <p class="font-bold">Informasi</p>
@@ -175,36 +189,34 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                 </div>
             <?php else: ?>
                 <?php foreach ($transactions as $transaction): ?>
-                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <p class="text-sm text-gray-600"><?= htmlspecialchars(date('d/m/Y H:i', strtotime($transaction['transaction_date']))); ?></p>
-                                <p class="font-semibold">
-                                    <?php
-                                    switch($transaction['transaction_type']) {
-                                        case 'Topup':
-                                            echo "Topup Saldo";
-                                            break;
-                                        case 'Masuk':
-                                            echo "Transfer dari " . htmlspecialchars($transaction['sender_name']);
-                                            break;
-                                        case 'Keluar':
-                                            echo "Transfer ke " . htmlspecialchars($transaction['receiver_name']);
-                                            break;
-                                        default:
-                                            echo "Transaksi Lainnya";
-                                    }
-                                    ?>
-                                </p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-lg font-bold <?= $transaction['transaction_type'] == 'Keluar' ? 'text-red-500' : 'text-green-500' ?>">
-                                    <?= $transaction['transaction_type'] == 'Keluar' ? '-' : '+' ?><?= formatCurrency($transaction['transaction_amount']); ?>
-                                </p>
-                                <span class="inline-block px-2 py-1 text-xs font-semibold rounded-full <?= getTransactionBadgeClass($transaction['transaction_type']) ?>">
-                                    <?= htmlspecialchars($transaction['transaction_type']); ?>
-                                </span>
-                            </div>
+                    <div class="bg-white rounded-lg shadow p-4 mb-4 flex justify-between items-center">
+                        <div>
+                            <p class="text-sm text-gray-600"><?= htmlspecialchars(date('d/m/Y H:i', strtotime($transaction['transaction_date']))); ?></p>
+                            <p class="font-semibold">
+                                <?php
+                                switch($transaction['transaction_type']) {
+                                    case 'Topup':
+                                        echo "Topup Saldo";
+                                        break;
+                                    case 'Masuk':
+                                        echo "Dari: " . htmlspecialchars($transaction['sender_name']);
+                                        break;
+                                    case 'Keluar':
+                                        echo "Ke: " . htmlspecialchars($transaction['receiver_name']);
+                                        break;
+                                    default:
+                                        echo "Transaksi Lainnya";
+                                }
+                                ?>
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-lg font-bold <?= $transaction['transaction_type'] == 'Keluar' ? 'text-red-500' : 'text-green-500' ?>">
+                                <?= $transaction['transaction_type'] == 'Keluar' ? '-' : '+' ?><?= formatCurrency($transaction['transaction_amount']); ?>
+                            </p>
+                            <span class="inline-block px-2 py-1 text-xs font-semibold rounded-full <?= getTransactionBadgeClass($transaction['transaction_type']) ?>">
+                                <?= htmlspecialchars($transaction['transaction_type']); ?>
+                            </span>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -212,12 +224,12 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         </div>
 
         <!-- Pagination -->
-        <div class="p-4">
+        <div class="p-4 bg-gray-50">
             <nav class="flex justify-center">
-                <ul class="flex">
+                <ul class="flex space-x-2">
                     <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                        <li class="mx-1">
-                            <a class="px-3 py-2 <?= $i == $page ? 'bg-blue-500 text-white' : 'bg-white text-blue-500' ?> rounded-lg" 
+                        <li>
+                            <a class="px-3 py-2 <?= $i == $page ? 'bg-blue-500 text-white' : 'bg-white text-blue-500' ?> rounded-lg shadow" 
                                href="?page=<?= $i ?>&date_from=<?= htmlspecialchars($dateFrom) ?>&date_to=<?= htmlspecialchars($dateTo) ?>&transaction_type=<?= htmlspecialchars($transactionType) ?>">
                                 <?= $i ?>
                             </a>
@@ -247,6 +259,15 @@ $transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             </a>
         </div>
     </div>
+
+    <script>
+        document.getElementById('filterToggle').addEventListener('click', function() {
+            var filterForm = document.getElementById('filterForm');
+            filterForm.classList.toggle('hidden');
+            this.querySelector('i').classList.toggle('fa-chevron-down');
+            this.querySelector('i').classList.toggle('fa-chevron-up');
+        });
+    </script>
 </body>
 </html>
 

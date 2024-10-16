@@ -10,7 +10,6 @@ if (!isset($_SESSION['customer_id'])) {
 $customer_id = $_SESSION['customer_id'];
 $message = "";
 $message_type = "info";
-$minimum_balance = 25000; // Minimum balance in Rupiah
 
 // Fungsi untuk memvalidasi input
 function validateInput($input) {
@@ -35,9 +34,7 @@ $accounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $transaction_type = validateInput($_POST['transaction_type']);
     
-    if ($transaction_type == 'transfer') {
-        // Logika transfer (tidak diubah)
-    } elseif ($transaction_type == 'topup') {
+    if ($transaction_type == 'topup') {
         $to_account_number = validateInput($_POST['topup_account']);
         $amount = currencyToNumber($_POST['topup_amount']);
 
@@ -86,8 +83,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
             }
         }
-    } elseif ($transaction_type == 'empty') {
-        // Logika kosongkan saldo (tidak diubah)
     }
 }
 
@@ -110,74 +105,89 @@ $total_balance = $result->fetch_assoc()['total_balance'];
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Top Up Saldo</title>
-    <link rel="stylesheet" href="topup.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+    <style>
+        @media (min-width: 640px) {
+            .form-container {
+                max-width: 640px;
+                margin: 0 auto;
+            }
+        }
+    </style>
 </head>
-<body class="bg-gray-100 h-screen flex items-center justify-center">
-    <div class="w-full max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
+<body class="bg-gray-100">
+    <div class="form-container bg-white shadow-lg min-h-screen flex flex-col">
         <!-- Header -->
-        <div class="flex items-center mb-4">
-            <a href="dashboard.php" class="text-gray-600"><i class="fas fa-arrow-left text-xl"></i></a>
+        <div class="bg-blue-500 text-white p-4 flex justify-between items-center">
+            <a href="dashboard.php" class="text-white"><i class="fas fa-arrow-left text-xl"></i></a>
             <h1 class="text-center flex-grow text-xl font-semibold">Top Up Saldo</h1>
         </div>
 
         <!-- Balance Info -->
-        <div class="bg-gray-800 text-white p-4 rounded-lg mb-6">
-            <p class="text-sm">Saldo Tersedia</p>
-            <p class="text-3xl font-bold"><?php echo formatCurrency($total_balance); ?></p>
-            <p class="text-xs">Terakhir diperbarui <?php echo date('d/m/Y H:i'); ?></p>
+        <div class="bg-white p-4 border-b">
+            <p class="text-sm text-gray-600">Saldo Tersedia</p>
+            <p class="text-2xl font-bold"><?= formatCurrency($total_balance); ?></p>
+            <p class="text-xs text-gray-500">Terakhir diperbarui <?= date('d M Y H:i'); ?></p>
         </div>
 
-        <?php if ($message): ?>
-            <div class="mb-4 p-4 rounded-lg <?php echo $message_type == 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
-                <?php echo htmlspecialchars($message); ?>
-            </div>
-        <?php endif; ?>
+        <!-- Form Top Up -->
+        <div class="p-4">
+            <?php if ($message): ?>
+                <div class="mb-4 p-4 rounded-lg <?= $message_type == 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
+                    <?= htmlspecialchars($message); ?>
+                </div>
+            <?php endif; ?>
 
-        <!-- Form -->
-        <form method="POST" action="">
-            <input type="hidden" name="transaction_type" value="topup">
-            
-            <!-- Nomor Rekening -->
-            <div class="mb-4">
-                <label class="block text-gray-700 text-sm mb-2" for="topup_account">Nomor Rekening</label>
-                <select name="topup_account" id="topup_account" class="w-full p-2 border rounded-md">
-                    <?php foreach ($accounts as $account): ?>
-                        <option value="<?= htmlspecialchars($account['account_number']) ?>">
-                            <?= htmlspecialchars($account['account_number']) ?> - 
-                            <?= htmlspecialchars($account['account_type']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+            <form method="POST" action="">
+                <input type="hidden" name="transaction_type" value="topup">
 
-            <!-- Tipe Akun -->
-            <div class="mb-4">
-                <label class="block text-gray-700 text-sm mb-2" for="account_type">Tipe Akun</label>
-                <div class="relative">
-                    <select id="account_type" class="w-full p-2 border rounded-md appearance-none">
-                        <option>Pilih Tipe Akun</option>
+                <!-- Nomor Rekening -->
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm mb-2" for="topup_account">Nomor Rekening</label>
+                    <select name="topup_account" id="topup_account" class="w-full p-2 border rounded-md">
                         <?php foreach ($accounts as $account): ?>
-                            <option><?= htmlspecialchars($account['account_type']) ?></option>
+                            <option value="<?= htmlspecialchars($account['account_number']) ?>">
+                                <?= htmlspecialchars($account['account_number']) ?> - 
+                                <?= htmlspecialchars($account['account_type']) ?>
+                            </option>
                         <?php endforeach; ?>
                     </select>
-                    <i class="fas fa-chevron-down absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500"></i>
                 </div>
-            </div>
 
-            <!-- Jumlah Top Up -->
-            <div class="mb-6">
-                <label class="block text-gray-700 text-sm mb-2" for="topup_amount">Jumlah Top Up</label>
-                <div class="relative">
-                    <span class="absolute left-3 top-2 text-gray-600">Rp</span>
-                    <input type="text" name="topup_amount" id="topup_amount" class="w-full p-2 pl-8 border rounded-md" placeholder="0" required>
+                <!-- Jumlah Top Up -->
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm mb-2" for="topup_amount">Jumlah Top Up</label>
+                    <div class="relative">
+                        <span class="absolute left-3 top-2 text-gray-600">Rp</span>
+                        <input type="text" name="topup_amount" id="topup_amount" class="w-full p-2 pl-8 border rounded-md" placeholder="0" required>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Continue Button -->
-            <button type="submit" class="w-full bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600">Continue Top Up</button>
-        </form>
+                <!-- Continue Button -->
+                <button type="submit" class="w-full bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600">Continue Top Up</button>
+            </form>
+        </div>
+
+        <!-- Footer Navigation -->
+        <div class="bg-white border-t flex justify-around py-2 fixed bottom-0 left-0 right-0 md:relative">
+            <a href="dashboard.php" class="flex flex-col items-center no-underline text-blue-500">
+                <i class="fas fa-home text-xl"></i>
+                <p class="text-xs mt-1">Beranda</p>
+            </a>
+            <a href="transfer.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-paper-plane text-xl"></i>
+                <p class="text-xs mt-1">Kirim</p>
+            </a>
+            <a href="transaction_history.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-history text-xl"></i>
+                <p class="text-xs mt-1">Riwayat</p>
+            </a>
+            <a href="logout.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-sign-out-alt text-xl"></i>
+                <p class="text-xs mt-1">Logout</p>
+            </a>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cleave.js/1.6.0/cleave.min.js"></script>

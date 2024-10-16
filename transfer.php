@@ -40,7 +40,7 @@ function callTransferAPI($url, $data) {
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10); // Set timeout 10 detik
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     
     $result = curl_exec($ch);
     
@@ -186,89 +186,110 @@ $result = $stmt->get_result();
 $total_balance = $result->fetch_assoc()['total_balance'];
 ?>
 
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kirim ke Rekening Bank</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+    <title>Transfer SwiftPay</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
+    <style>
+        @media (min-width: 640px) {
+            .dashboard-container {
+                max-width: 640px;
+                margin: 0 auto;
+            }
+        }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden">
-        <div class="bg-blue-600 text-white p-4">
-            <div class="flex items-center mb-4">
-                <a href="dashboard.php" class="text-white"><i class="fas fa-arrow-left text-xl"></i></a>
-                <h1 class="text-center flex-grow text-xl font-semibold">Kirim ke Rekening Bank</h1>
+<body class="bg-gray-100">
+    <div class="dashboard-container bg-white shadow-lg min-h-screen flex flex-col">
+        <!-- Header -->
+        <div class="bg-blue-500 text-white p-4 flex justify-between items-center">
+            <div>
+                <p class="font-bold text-lg">Transfer Uang</p>
+                <p class="text-sm">Kirim uang dengan mudah dan aman</p>
             </div>
-            <div class="text-center">
-                <p class="text-sm opacity-80">Total Saldo</p>
-                <p class="text-3xl font-bold"><?php echo formatCurrency($total_balance); ?></p>
-                <p class="text-xs opacity-70">Terakhir diperbarui <?php echo date('d/m/Y H:i'); ?></p>
+            <div class="space-x-4">
+                <a href="notifications.php" class="text-white"><i class="fas fa-bell text-xl"></i></a>
+                <a href="settings.php" class="text-white"><i class="fas fa-cog text-xl"></i></a>
             </div>
         </div>
 
-        <div class="p-6">
+        <!-- Balance Section -->
+        <div class="bg-white p-4 border-b">
+            <p class="text-sm text-gray-600">Total Saldo</p>
+            <p class="text-2xl font-bold"><?= formatCurrency($total_balance); ?></p>
+            <p class="text-xs text-gray-500">Terakhir diperbarui <?= date('d M Y H:i'); ?></p>
+        </div>
+
+        <!-- Transfer Form -->
+        <div class="flex-grow p-4">
             <?php if ($message): ?>
-                <div class="mb-4 p-4 rounded-lg <?php echo $message_type == 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
-                    <?php echo htmlspecialchars($message); ?>
+                <div class="p-2 mb-4 text-<?= $message_type === 'danger' ? 'red' : 'green'; ?>-600 bg-<?= $message_type === 'danger' ? 'red' : 'green'; ?>-100 border border-<?= $message_type === 'danger' ? 'red' : 'green'; ?>-400 rounded">
+                    <?= $message; ?>
                 </div>
             <?php endif; ?>
 
-            <form method="POST" action="">
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="from_account">Dari Akun</label>
-                    <select name="from_account" id="from_account" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" required>
+            <form method="POST" action="" class="space-y-4">
+                <div>
+                    <label for="from_account" class="block text-sm font-medium text-gray-700">Dari Rekening</label>
+                    <select id="from_account" name="from_account" required class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                        <option value="" disabled selected>Pilih Rekening</option>
                         <?php foreach ($accounts as $account): ?>
-                            <option value="<?= htmlspecialchars($account['account_number']) ?>">
-                                <?= htmlspecialchars($account['account_number']) ?> - 
-                                <?= htmlspecialchars($account['account_type']) ?> 
-                                (Saldo: <?= formatCurrency($account['available_balance']) ?>)
+                            <option value="<?= htmlspecialchars($account['account_number']); ?>">
+                                <?= htmlspecialchars($account['account_number']); ?> - <?= formatCurrency($account['available_balance']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="server">Server Tujuan</label>
-                    <select name="server" id="server" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                <div>
+                    <label for="to_account" class="block text-sm font-medium text-gray-700">Ke Rekening</label>
+                    <input type="text" id="to_account" name="to_account" required class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Nomor Rekening Tujuan" />
+                </div>
+
+                <div>
+                    <label for="amount" class="block text-sm font-medium text-gray-700">Jumlah Transfer</label>
+                    <input type="text" id="amount" name="amount" required class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Jumlah" />
+                </div>
+
+                <div>
+                    <label for="server" class="block text-sm font-medium text-gray-700">Pilih Server</label>
+                    <select id="server" name="server" required class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
                         <?php foreach ($servers as $key => $server): ?>
-                            <option value="<?= htmlspecialchars($key) ?>"><?= htmlspecialchars($server['name']) ?></option>
+                            <option value="<?= $key; ?>"><?= $server['name']; ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="to_account">Nomor Rekening</label>
-                    <input class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" type="text" name="to_account" id="to_account" placeholder="Nomor Rekening" required />
-                </div>
-
-                <div class="mb-6">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="amount">Jumlah Transfer</label>
-                    <div class="relative">
-                        <span class="absolute left-3 top-2 text-gray-600">Rp</span>
-                        <input type="text" name="amount" id="amount" class="w-full pl-8 pr-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-blue-500" placeholder="0" required>
-                    </div>
-                </div>
-
-                <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:shadow-outline">
-                    Lanjutkan
+                <button type="submit" class="w-full p-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                    Kirim Uang
                 </button>
             </form>
         </div>
-    </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cleave.js/1.6.0/cleave.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            new Cleave('#amount', {
-                numeral: true,
-                numeralThousandsGroupStyle: 'thousand',
-                numeralDecimalMark: ',',
-                delimiter: '.'
-            });
-        });
-    </script>
+        <!-- Footer Navigation -->
+        <div class="bg-white border-t flex justify-around py-2 fixed bottom-0 left-0 right-0 md:relative">
+            <a href="dashboard.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-home text-xl"></i>
+                <p class="text-xs mt-1">Beranda</p>
+            </a>
+            <a href="transfer.php" class="flex flex-col items-center no-underline text-blue-500">
+                <i class="fas fa-paper-plane text-xl"></i>
+                <p class="text-xs mt-1">Kirim</p>
+            </a>
+            <a href="transaction_history.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-history text-xl"></i>
+                <p class="text-xs mt-1">Riwayat</p>
+            </a>
+            <a href="logout.php" class="flex flex-col items-center no-underline text-gray-500 hover:text-blue-500">
+                <i class="fas fa-sign-out-alt text-xl"></i>
+                <p class="text-xs mt-1">Logout</p>
+            </a>
+        </div>
+    </div>
 </body>
 </html>
