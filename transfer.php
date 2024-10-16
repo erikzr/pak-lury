@@ -30,7 +30,7 @@ function formatCurrency($amount) {
 function getServers() {
     return [
         'local' => ['name' => 'Server Lokal', 'url' => 'http://localhost/pak-lury/api_transfer.php'],
-        'server2' => ['name' => 'Server 2', 'url' => 'http://192.168.9.27/pak-lury/api_transfer.php'],
+        'server2' => ['name' => 'Server 2', 'url' => 'http://192.168.9.190/pak-lury/api_transfer.php'],
     ];
 }
 
